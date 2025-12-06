@@ -2,6 +2,10 @@
 
 **[Russian Version (Русская версия)](README_ru.md)**
 
+> [!IMPORTANT]
+> **Key Idea**: This method provides a definitive solution to **Catastrophic Forgetting**.
+> The architecture guarantees that training on new tasks **mathematically cannot** degrade neural pathways responsible for old knowledge. This makes it an ideal foundation for *Continual Learning*.
+
 ## Overview
 
 **GraphAI** is a Go-based implementation of the **Dynamic Topology Graph - Masked Attention (DTG-MA)** layer, integrated with real-world Large Language Models (LLMs) via the `Cybertron` library. This project demonstrates a **Continual Learning** architecture designed to adapt to new tasks without catastrophic forgetting.
