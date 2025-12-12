@@ -66,6 +66,13 @@ func NewHybridLayer(g *gorgonia.ExprGraph, inputDim, outputDim int) *HybridGraph
 	return l
 }
 
+// AddTask is a convenience helper that adds a full Q/K/V set for a new task.
+func (l *HybridGraphLayer) AddTask(taskID int) {
+	l.AddEdge("W_Q", l.InputDim, l.OutputDim, taskID)
+	l.AddEdge("W_K", l.InputDim, l.OutputDim, taskID)
+	l.AddEdge("W_V", l.InputDim, l.OutputDim, taskID)
+}
+
 // AddEdge creates a new weight matrix for a specific task.
 func (l *HybridGraphLayer) AddEdge(name string, row, col, taskID int) {
 	w := gorgonia.NewMatrix(l.Graph, tensor.Float32,
@@ -208,6 +215,76 @@ func (l *HybridGraphLayer) Forward(input *gorgonia.Node, taskID int) (*gorgonia.
 	return output, nil
 }
 
+// ForwardTaskScoped is a stricter DTG-MA interpretation: projections are computed
+// using only edges belonging to the provided taskID (per-prefix).
+// This is useful for continual-learning demos where each task must be isolated.
+func (l *HybridGraphLayer) ForwardTaskScoped(input *gorgonia.Node, taskID int) (*gorgonia.Node, error) {
+	var Q, K, V *gorgonia.Node
+	var err error
+
+	Q, err = l.computeProjectionTaskScoped(input, "W_Q", taskID)
+	if err != nil {
+		return nil, err
+	}
+	K, err = l.computeProjectionTaskScoped(input, "W_K", taskID)
+	if err != nil {
+		return nil, err
+	}
+	V, err = l.computeProjectionTaskScoped(input, "W_V", taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	K_T, err := gorgonia.Transpose(K, 0, 2, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	scores, err := gorgonia.BatchedMatMul(Q, K_T)
+	if err != nil {
+		return nil, err
+	}
+
+	dk := float64(l.OutputDim)
+	scale := gorgonia.NodeFromAny(l.Graph, float32(1.0/math.Sqrt(dk)), gorgonia.WithName("Scale"))
+	scores, err = gorgonia.HadamardProd(scores, scale)
+	if err != nil {
+		return nil, err
+	}
+
+	mask, ok := l.TaskMasks[taskID]
+	if !ok {
+		return nil, fmt.Errorf("mask for task %d not found", taskID)
+	}
+	scores, err = gorgonia.BroadcastAdd(scores, mask, nil, []byte{0})
+	if err != nil {
+		return nil, err
+	}
+
+	b, s, _ := scores.Shape()[0], scores.Shape()[1], scores.Shape()[2]
+	flatScores, err := gorgonia.Reshape(scores, tensor.Shape{b * s, s})
+	if err != nil {
+		return nil, err
+	}
+
+	probsFlat, err := gorgonia.SoftMax(flatScores)
+	if err != nil {
+		return nil, err
+	}
+
+	probs, err := gorgonia.Reshape(probsFlat, tensor.Shape{b, s, s})
+	if err != nil {
+		return nil, err
+	}
+
+	output, err := gorgonia.BatchedMatMul(probs, V)
+	if err != nil {
+		return nil, err
+	}
+
+	return output, nil
+}
+
 // computeProjection sums up x*W for all edges with given name prefix (e.g. W_Q).
 func (l *HybridGraphLayer) computeProjection(input *gorgonia.Node, prefix string) (*gorgonia.Node, error) {
 	var sum *gorgonia.Node
@@ -245,6 +322,45 @@ func (l *HybridGraphLayer) computeProjection(input *gorgonia.Node, prefix string
 
 	// Reshape back to (B, S, E_out)
 	// Assuming OutputDim matches projected dim
+	reshaped, err := gorgonia.Reshape(sum, tensor.Shape{b, s, l.OutputDim})
+	if err != nil {
+		return nil, err
+	}
+
+	return reshaped, nil
+}
+
+func (l *HybridGraphLayer) computeProjectionTaskScoped(input *gorgonia.Node, prefix string, taskID int) (*gorgonia.Node, error) {
+	var sum *gorgonia.Node
+
+	b, s, e := input.Shape()[0], input.Shape()[1], input.Shape()[2]
+	flatInput, err := gorgonia.Reshape(input, tensor.Shape{b * s, e})
+	if err != nil {
+		return nil, err
+	}
+
+	found := false
+	for _, edge := range l.Edges {
+		if edge.Name == prefix && edge.TaskID == taskID {
+			proj, err := gorgonia.Mul(flatInput, edge.Weight)
+			if err != nil {
+				return nil, err
+			}
+			if sum == nil {
+				sum = proj
+			} else {
+				sum, err = gorgonia.Add(sum, proj)
+				if err != nil {
+					return nil, err
+				}
+			}
+			found = true
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("no edges found for %s in task %d", prefix, taskID)
+	}
+
 	reshaped, err := gorgonia.Reshape(sum, tensor.Shape{b, s, l.OutputDim})
 	if err != nil {
 		return nil, err

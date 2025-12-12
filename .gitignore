@@ -18,3 +18,10 @@ models/
 
 # OS files
 .DS_Store
+patent_technical_description.md
+habr_article_dtgma_with_cultural_images.md
+DTG-MA_article.md
+.gitignore
+habr_article_habr_professional.md
+habr_article_dtgma_main.md
+habr_formatted_dtgma.md

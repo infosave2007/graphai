@@ -77,6 +77,35 @@ export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
 go run main.go layer.go real_llm.go head.go
 ```
 
+### 2. Continual Learning demo on real text (movies → sports)
+This demo runs **two modes** back-to-back:
+
+1) **Baseline (naive fine-tune)**: sequential training without freezing (and with a single shared classifier head).
+2) **DTG-MA**: freezes old edges + uses task-scoped routing (Task0 predictions do not change after training Task1).
+
+Run (defaults to MiniLM embeddings):
+
+```bash
+export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
+go run -tags continual_real_demo continual_real_demo.go layer.go head.go real_llm.go
+```
+
+Optional configuration:
+
+```bash
+# reproducibility
+export DTG_RUNS=3
+export DTG_SEED=42
+
+# embedding model selection
+# export DTG_MODEL=bert-base-uncased
+
+# training hyperparameters
+# export DTG_EPOCHS0=500
+# export DTG_EPOCHS1=450
+# export DTG_LR=0.0015
+```
+
 ### 2. Large Scale Test (BERT Base)
 Runs the training loop using `bert-base-uncased` (standard 768-dim model) with a larger dataset.
 ```bash
@@ -85,6 +114,19 @@ go run run_large.go layer.go real_llm.go head.go
 ```
 *Note: The first run will download the model weights (~440MB).*
 
+#### Continual demo on BERT Base
+
+```bash
+export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
+export DTG_MODEL=bert-base-uncased
+export DTG_RUNS=1
+export DTG_SEED=42
+export DTG_EPOCHS0=500
+export DTG_EPOCHS1=450
+export DTG_LR=0.001
+go run -tags continual_real_demo continual_real_demo.go layer.go head.go real_llm.go
+```
+
 ## Architecture Details
 
 ### `layer.go`
@@ -92,6 +134,9 @@ Contains the core `HybridGraphLayer` implementation.
 - **`DTGEdge`**: Struct representing a learnable connection `[Weight, TaskID, Frozen]`.
 - **`Forward(input, taskID)`**: Computes masked attention. It selects the mask corresponding to `taskID` and applies it additively to the scaled dot-product scores before Softmax.
 - **`FreezeOldTasks(currentTaskID)`**: Iterates through edges and sets `Frozen=true` for any edge belonging to previous tasks.
+
+Additional helper used by the continual demos:
+- **`ForwardTaskScoped(input, taskID)`**: computes projections using only edges belonging to `taskID` (useful for strict task isolation in demos).
 
 ### `real_llm.go`
 A wrapper around the `Cybertron` library.

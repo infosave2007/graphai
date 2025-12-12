@@ -75,6 +75,35 @@ export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
 go run main.go layer.go real_llm.go head.go
 ```
 
+### 2. Continual Learning демо на реальном тексте (кино → спорт)
+Демо показывает **два режима** в одном запуске:
+
+1) **Baseline (naive fine-tune)** — последовательное дообучение без заморозки (и с одним общим классификатором на обе задачи).
+2) **DTG‑MA** — заморозка старых рёбер + task-scoped роутинг (предсказания на Task0 не меняются после обучения Task1).
+
+Запуск (по умолчанию MiniLM):
+
+```bash
+export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
+go run -tags continual_real_demo continual_real_demo.go layer.go head.go real_llm.go
+```
+
+Полезные настройки (опционально):
+
+```bash
+# воспроизводимость
+export DTG_RUNS=3
+export DTG_SEED=42
+
+# выбор модели эмбеддингов
+# export DTG_MODEL=bert-base-uncased
+
+# гиперпараметры обучения
+# export DTG_EPOCHS0=500
+# export DTG_EPOCHS1=450
+# export DTG_LR=0.0015
+```
+
 ### 2. Масштабный Тест (BERT Base)
 Запуск с моделью `bert-base-uncased` (768 измерений) и расширенным датасетом.
 ```bash
@@ -83,6 +112,20 @@ go run run_large.go layer.go real_llm.go head.go
 ```
 *Примечание: При первом запуске будет скачано около 440MB весов модели в папку `models/`.*
 
+#### Continual демо на BERT Base
+То же continual-демо, но на большой модели эмбеддингов:
+
+```bash
+export ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.25
+export DTG_MODEL=bert-base-uncased
+export DTG_RUNS=1
+export DTG_SEED=42
+export DTG_EPOCHS0=500
+export DTG_EPOCHS1=450
+export DTG_LR=0.001
+go run -tags continual_real_demo continual_real_demo.go layer.go head.go real_llm.go
+```
+
 ## Детали Архитектуры
 
 ### `layer.go`
@@ -90,6 +133,9 @@ go run run_large.go layer.go real_llm.go head.go
 - **`DTGEdge`**: Структура ребра `[Вес, ID Задачи, Заморожен]`.
 - **`Forward(input, taskID)`**: Вычисляет маскированное внимание. Выбирает маску задачи и накладывает её аддитивно на Scores перед Softmax.
 - **`FreezeOldTasks`**: Блокирует градиенты для задач $ID < Current$.
+
+Дополнительно для демонстрации continual learning:
+- **`ForwardTaskScoped(input, taskID)`**: строгий режим, который использует только рёбра текущей задачи при построении Q/K/V (удобно для демонстрации изоляции).
 
 ### `real_llm.go`
 Обертка над `Cybertron`.
