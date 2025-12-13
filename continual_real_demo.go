@@ -512,6 +512,11 @@ func evalTask(taskID int, w *weightsBundle, embDim int, xVal, yVal tensor.Tensor
 	}
 
 	p := probs.Value().Data().([]float32)
+	for i := range p {
+		if !isFinite32(p[i]) {
+			return 0, nil, fmt.Errorf("non-finite probability at index %d: %v", i, p[i])
+		}
+	}
 	acc := accuracyFromProbs(p, y.Value().Data().([]float32))
 	cp := make([]float32, len(p))
 	copy(cp, p)
@@ -600,6 +605,9 @@ func maxAbsDiff(a, b []float32) float32 {
 	}
 	max := float32(0)
 	for i := range a {
+		if !isFinite32(a[i]) || !isFinite32(b[i]) {
+			return float32(math.NaN())
+		}
 		d := a[i] - b[i]
 		if d < 0 {
 			d = -d
@@ -609,4 +617,14 @@ func maxAbsDiff(a, b []float32) float32 {
 		}
 	}
 	return max
+}
+
+func isFinite32(v float32) bool {
+	if math.IsNaN(float64(v)) {
+		return false
+	}
+	if math.IsInf(float64(v), 0) {
+		return false
+	}
+	return true
 }
